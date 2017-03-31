@@ -198,6 +198,7 @@ type ChainLink struct {
 	payloadJSON *jsonw.Wrapper
 	unpacked    *ChainLinkUnpacked
 	cki         *ComputedKeyInfos
+	outerLinkV2 *OuterLinkV2
 
 	typed                  TypedChainLink
 	isOwnNewLinkFromServer bool
@@ -330,35 +331,35 @@ func (c *ChainLink) checkAgainstMerkleTree(t *MerkleTriple) (found bool, err err
 	return
 }
 
-func (c *ChainLink) UnpackPayloadJSON(tmp *ChainLinkUnpacked) (err error) {
+func (tmp *ChainLinkUnpacked) unpackPayloadJSON(payloadJSON *jsonw.Wrapper) (err error) {
 	var sq int64
 	var e2 error
 
-	if jw := c.payloadJSON.AtPath("body.key.fingerprint"); !jw.IsNil() {
+	if jw := payloadJSON.AtPath("body.key.fingerprint"); !jw.IsNil() {
 		if tmp.pgpFingerprint, e2 = GetPGPFingerprint(jw); e2 != nil {
 			err = e2
 		}
 	}
-	if jw := c.payloadJSON.AtPath("body.key.kid"); !jw.IsNil() {
+	if jw := payloadJSON.AtPath("body.key.kid"); !jw.IsNil() {
 		if tmp.kid, e2 = GetKID(jw); e2 != nil {
 			err = e2
 		}
 	}
-	if jw := c.payloadJSON.AtPath("body.key.eldest_kid"); !jw.IsNil() {
+	if jw := payloadJSON.AtPath("body.key.eldest_kid"); !jw.IsNil() {
 		if tmp.eldestKID, e2 = GetKID(jw); e2 != nil {
 			err = e2
 		}
 	}
-	c.payloadJSON.AtPath("body.key.username").GetStringVoid(&tmp.username, &err)
-	GetUIDVoid(c.payloadJSON.AtPath("body.key.uid"), &tmp.uid, &err)
-	GetLinkIDVoid(c.payloadJSON.AtKey("prev"), &tmp.prev, &err)
-	c.payloadJSON.AtPath("body.type").GetStringVoid(&tmp.typ, &err)
-	c.payloadJSON.AtKey("ctime").GetInt64Void(&tmp.ctime, &err)
+	payloadJSON.AtPath("body.key.username").GetStringVoid(&tmp.username, &err)
+	GetUIDVoid(payloadJSON.AtPath("body.key.uid"), &tmp.uid, &err)
+	GetLinkIDVoid(payloadJSON.AtKey("prev"), &tmp.prev, &err)
+	payloadJSON.AtPath("body.type").GetStringVoid(&tmp.typ, &err)
+	payloadJSON.AtKey("ctime").GetInt64Void(&tmp.ctime, &err)
 
-	c.payloadJSON.AtKey("seqno").GetInt64Void(&sq, &err)
+	payloadJSON.AtKey("seqno").GetInt64Void(&sq, &err)
 
 	var ei int64
-	c.payloadJSON.AtKey("expire_in").GetInt64Void(&ei, &err)
+	payloadJSON.AtKey("expire_in").GetInt64Void(&ei, &err)
 
 	if err != nil {
 		return
@@ -372,7 +373,7 @@ func (c *ChainLink) UnpackPayloadJSON(tmp *ChainLinkUnpacked) (err error) {
 
 func (c *ChainLink) UnpackLocal() (err error) {
 	tmp := ChainLinkUnpacked{}
-	err = c.UnpackPayloadJSON(&tmp)
+	err = tmp.unpackPayloadJSON(c.payloadJSON)
 	if err == nil {
 		c.unpacked = &tmp
 	}
@@ -390,42 +391,85 @@ func (c *ChainLink) UnpackComputedKeyInfos(jw *jsonw.Wrapper) (err error) {
 	return
 }
 
+type chainLinkPacked struct {
+	sigID keybase1.SigID `json:"sig_id"`
+	sig string `json:"sig"`
+	sigVersion int `json:"sigVersion"`
+	payloadJSON string `json:"payload_json"`
+	proofTextFull string `json:"proof_text_full"`
+	sigVerified bool `json:"sig_verified"`
+}
+
 func (c *ChainLink) Unpack(trusted bool, selfUID keybase1.UID) (err error) {
 	tmp := ChainLinkUnpacked{}
 
-	c.packed.AtKey("sig").GetStringVoid(&tmp.sig, &err)
 	tmp.sigID, err = GetSigID(c.packed.AtKey("sig_id"), true)
-	c.packed.AtKey("payload_json").GetStringVoid(&tmp.payloadJSONStr, &err)
+	c.packed.AtKey("sig").GetStringVoid(&tmp.sig, &err)
 	c.packed.AtKey("sig_version").GetIntVoid(&tmp.sigVersion, &err)
 
 	if err != nil {
 		return err
 	}
-
-	c.payloadJSON, err = jsonw.Unmarshal([]byte(tmp.payloadJSONStr))
-	if err != nil {
-		return err
+	if jw := c.packed.AtKey("payload_json"); !jw.IsNil() {
+		payloadJSONStr, err := jw.GetString()
+		if err != nil {
+			return err
+		}
+		payloadJSON, err := jsonw.Unmarshal([]byte(payloadJSONStr))
+		if err != nil {
+			return err
+		}
+		if err := tmp.unpackPayloadJSON(payloadJSON); err != nil {
+			return err
+		}
+		c.payloadJSON = payloadJSON
 	}
 
-	err = c.UnpackPayloadJSON(&tmp)
-	if err != nil {
-		return err
-	}
+	var sigKID, serverKID, payloadKID keybase1.KID
 
-	// Set the unpacked.kid member if it's not already set. If it is set, check
-	// that the value is consistent with what's in the outer JSON blob.
-	serverKID, err := GetKID(c.packed.AtKey("kid"))
-	if err != nil {
-		return err
-	}
-	if tmp.kid.IsNil() {
-		tmp.kid = serverKID
-	} else if tmp.kid != serverKID {
-		return ChainLinkKIDMismatchError{
-			fmt.Sprintf("Payload KID (%s) doesn't match server KID (%s).",
-				tmp.kid, serverKID),
+	if tmp.sigVersion == 2 {
+		c.outerLinkV2, sigKID, err = DecodeOuterLinkV2(tmp.sig)
+		if err != nil {
+			return err
 		}
 	}
+
+	payloadKID = tmp.kid
+
+	if jw := c.packed.AtKey("kid"); !jw.IsNil() {
+		serverKID, err = GetKID(jw)
+		if err != nil {
+			return err
+		}
+	}
+
+	if !payloadKID.IsNil() && !serverKID.IsNil() && !payloadKID.Equal(serverKID) {
+		return ChainLinkKIDMismatchError{
+			fmt.Sprintf("Payload KID (%s) doesn't match server KID (%s).",
+				payloadKID, serverKID),
+		}
+	}
+
+	if !payloadKID.IsNil() && !sigKID.IsNil() && !payloadKID.Equal(sigKID) {
+		return ChainLinkKIDMismatchError{
+			fmt.Sprintf("Payload KID (%s) doesn't match sig KID (%s).",
+				payloadKID, sigKID),
+		}
+	}
+
+	if !serverKID.IsNil() && !sigKID.IsNil() && !serverKID.Equal(sigKID) {
+		return ChainLinkKIDMismatchError{
+			fmt.Sprintf("Server KID (%s) doesn't match sig KID (%s).",
+				serverKID, sigKID),
+		}
+	}
+
+	if tmp.kid.IsNil() && !sigKID.IsNil() {
+		tmp.kid= sigKID
+	}
+
+	// Note, we can still can in a situation in which don't know any kids!
+	// That would be bad *if* we need to verify the signature for this link.
 
 	// only unpack the proof_text_full if owner of this link
 	if tmp.uid.Equal(selfUID) {
@@ -481,9 +525,12 @@ func (c *ChainLink) VerifyHash() error {
 		return nil
 	}
 
-	h := sha256.Sum256([]byte(c.unpacked.payloadJSONStr))
-	if !FastByteArrayEq(h[:], c.id) {
-		return fmt.Errorf("hash mismatch")
+	// For V2 Sigchain links, we might not have the payload (to save bandwidth, etc)
+	if c.unpacked.payloadJSONStr != "" {
+		h := sha256.Sum256([]byte(c.unpacked.payloadJSONStr))
+		if !FastByteArrayEq(h[:], c.id) {
+			return fmt.Errorf("hash mismatch")
+		}
 	}
 	c.hashVerified = true
 	c.G().LinkCache.Mutate(c.id, func(c *ChainLink) { c.hashVerified = true })
@@ -506,6 +553,8 @@ func (c *ChainLink) verifyPayloadV2() error {
 	if c.payloadVerified {
 		return nil
 	}
+
+
 
 	var err error
 	var version int

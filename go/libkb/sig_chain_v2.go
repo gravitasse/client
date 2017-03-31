@@ -2,7 +2,7 @@ package libkb
 
 import (
 	"fmt"
-	"github.com/keybase/go-codec/codec"
+	keybase1 "github.com/keybase/client/go/protocol/keybase1"
 )
 
 type SigchainV2Type int
@@ -35,9 +35,20 @@ type OuterLinkV2 struct {
 }
 
 func (o OuterLinkV2) Encode() ([]byte, error) {
-	var encoded []byte
-	err := codec.NewEncoderBytes(&encoded, codecHandle()).Encode(o)
-	return encoded, err
+	return MsgpackEncode(o)
+}
+
+func DecodeOuterLinkV2(armored string) (*OuterLinkV2, keybase1.KID, error) {
+	payload, kid, _, err := SigExtractPayloadAndKID(armored)
+	if err != nil {
+		return nil, kid, err
+	}
+	var ret OuterLinkV2
+	err = MsgpackDecode(&ret, payload)
+	if err != nil {
+		return nil, kid, err
+	}
+	return &ret, kid, nil
 }
 
 func SigchainV2TypeFromV1TypeAndRevocations(s string, hasRevocations bool) (SigchainV2Type, error) {
