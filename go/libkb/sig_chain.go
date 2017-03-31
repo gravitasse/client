@@ -483,6 +483,7 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links []*C
 		}
 
 		if err != nil {
+			sc.G().Log.CDebugf(ctx, "| bailing out on error: %s", err)
 			return
 		}
 	}

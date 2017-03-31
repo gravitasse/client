@@ -1,6 +1,7 @@
 package libkb
 
 import (
+	"encoding/base64"
 	"fmt"
 	keybase1 "github.com/keybase/client/go/protocol/keybase1"
 )
@@ -43,6 +44,19 @@ type OuterLinkV2WithMetadata struct {
 
 func (o OuterLinkV2) Encode() ([]byte, error) {
 	return MsgpackEncode(o)
+}
+
+func DecodeCompressedOuterLinkV2(b64encoded string) (*OuterLinkV2WithMetadata, error) {
+	payload, err := base64.StdEncoding.DecodeString(b64encoded)
+	if err != nil {
+		return nil, err
+	}
+	var ol OuterLinkV2
+	err = MsgpackDecode(&ol, payload)
+	if err != nil {
+		return nil, err
+	}
+	return &OuterLinkV2WithMetadata{OuterLinkV2: ol}, nil
 }
 
 func DecodeOuterLinkV2(armored string) (*OuterLinkV2WithMetadata, error) {

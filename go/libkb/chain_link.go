@@ -412,8 +412,24 @@ type chainLinkPacked struct {
 	SigVerified   bool           `json:"sig_verified"`
 }
 
+func (c *ChainLink) unpackCompacted(raw string, err error) error {
+	if err != nil {
+		return err
+	}
+	c.outerLinkV2, err = DecodeCompressedOuterLinkV2(raw)
+	if err != nil {
+		return err
+	}
+	c.id = c.outerLinkV2.Curr
+	return nil
+}
+
 func (c *ChainLink) Unpack(trusted bool, selfUID keybase1.UID) (err error) {
 	tmp := ChainLinkUnpacked{}
+
+	if jw := c.packed.AtKey("c2"); !jw.IsNil() {
+		return c.unpackCompacted(jw.GetString())
+	}
 
 	tmp.sigID, err = GetSigID(c.packed.AtKey("sig_id"), true)
 	c.packed.AtKey("sig").GetStringVoid(&tmp.sig, &err)
@@ -699,6 +715,10 @@ func (c *ChainLink) VerifySigWithKeyFamily(ckf ComputedKeyFamily) (err error) {
 	var verifyKID keybase1.KID
 	var sigID keybase1.SigID
 
+	if c.unpacked.sig == "" {
+		return ChainLinkError{"cannot verify signature -- none available; is this a compressed link?"}
+	}
+
 	verifyKID, err = c.checkServerSignatureMetadata(ckf)
 	if err != nil {
 		return err
@@ -838,7 +858,7 @@ func (c *ChainLink) checkServerSignatureMetadata(ckf ComputedKeyFamily) (ret key
 	}
 
 	if verifyKID.IsNil() {
-		return ret, ChainLinkError{"cannot verify signature without a KID or PGP fingerprint"}
+		return ret, ChainLinkError{"cannot verify signature without a KID"}
 	}
 
 	serverKey, err := ckf.FindKeyWithKIDUnsafe(verifyKID)
