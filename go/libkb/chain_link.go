@@ -454,8 +454,6 @@ func (c *ChainLink) Unpack(trusted bool, selfUID keybase1.UID) (err error) {
 			return err
 		}
 		linkID := ol2.Curr
-		c.G().Log.Debug("outer link decode: %+v", ol2)
-		c.G().Log.Debug("chain link: %+v", c)
 		if c.id != nil && !c.id.Eq(linkID) {
 			return errors.New("chainlink hash mismatch between server and body hash")
 		}
@@ -648,24 +646,18 @@ func (c *ChainLink) verifyPayloadV1() error {
 	if c.payloadVerified {
 		return nil
 	}
-
-	c.G().Log.Debug("XXX trying to assert...")
 	sigid, err := SigAssertPayload(c.unpacked.sig, c.getFixedPayload())
-	c.G().Log.Debug("XXX wrong payload?: %s", err)
 	if err != nil {
 		return err
 	}
-
 	c.markPayloadVerified(sigid)
 	return nil
 }
 
 func (c *ChainLink) getSeqnoFromPayload() Seqno {
-	c.G().Log.Debug("calling GetSeqno")
 	if c.unpacked != nil {
 		return c.unpacked.seqno
 	}
-	c.G().Log.Debug("returning -1 since not unpacked")
 	return Seqno(-1)
 }
 
