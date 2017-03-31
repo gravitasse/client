@@ -213,7 +213,7 @@ func doChainTest(t *testing.T, testCase TestCase) {
 	// Tests that expected an error terminated above. Tests that get here
 	// should succeed without errors.
 	if sigchainErr != nil {
-		t.Fatal(err)
+		t.Fatal(sigchainErr)
 	}
 
 	// Check the expected results: total unrevoked links, sibkeys, and subkeys.

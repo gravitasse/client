@@ -351,6 +351,12 @@ func (sc *SigChain) GetCurrentSubchain(eldest keybase1.KID) (links []*ChainLink,
 	l := len(sc.chainLinks)
 	lastGood := l
 	for i := l - 1; i >= 0; i-- {
+
+		if sc.chainLinks[i].IsCompacted() {
+			lastGood = i
+			continue
+		}
+
 		// Check that the eldest KID hasn't changed.
 		if sc.chainLinks[i].ToEldestKID().Equal(eldest) {
 			lastGood = i
@@ -444,7 +450,7 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links []*C
 		isDelegating := (tcl.GetRole() != DLGNone)
 		isModifyingKeys := isDelegating || tcl.Type() == DelegationTypePGPUpdate
 		isFinalLink := (linkIndex == len(links)-1)
-		isLastLinkInSameKeyRun := (isFinalLink || newKID != links[linkIndex+1].GetKID())
+		isLastLinkNotInSameKeyRun := (isFinalLink || links[linkIndex+1].IsCompacted() || newKID != links[linkIndex+1].GetKID())
 
 		if pgpcl, ok := tcl.(*PGPUpdateChainLink); ok {
 			if hash := pgpcl.GetPGPFullHash(); hash != "" {
@@ -453,7 +459,7 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links []*C
 			}
 		}
 
-		if isModifyingKeys || isFinalLink || isLastLinkInSameKeyRun {
+		if isModifyingKeys || isFinalLink || isLastLinkNotInSameKeyRun {
 			err = link.VerifySigWithKeyFamily(ckf)
 			if err != nil {
 				sc.G().Log.CDebugf(ctx, "| Failure in VerifySigWithKeyFamily: %s", err)
