@@ -6,6 +6,7 @@ package libkb
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -405,7 +406,15 @@ func (c *ChainLink) Unpack(trusted bool, selfUID keybase1.UID) (err error) {
 
 	tmp.sigID, err = GetSigID(c.packed.AtKey("sig_id"), true)
 	c.packed.AtKey("sig").GetStringVoid(&tmp.sig, &err)
-	c.packed.AtKey("sig_version").GetIntVoid(&tmp.sigVersion, &err)
+
+	sigVersion := 1
+	if jw := c.packed.AtKey("sig_version"); !jw.IsNil() {
+		sigVersion, err = jw.GetInt()
+		if err != nil {
+			return err
+		}
+	}
+	tmp.sigVersion = sigVersion
 
 	if err != nil {
 		return err
@@ -428,10 +437,19 @@ func (c *ChainLink) Unpack(trusted bool, selfUID keybase1.UID) (err error) {
 	var sigKID, serverKID, payloadKID keybase1.KID
 
 	if tmp.sigVersion == 2 {
-		c.outerLinkV2, sigKID, err = DecodeOuterLinkV2(tmp.sig)
+		var ol2 *OuterLinkV2
+		ol2, sigKID, err = DecodeOuterLinkV2(tmp.sig)
 		if err != nil {
 			return err
 		}
+		linkID := ol2.curr
+		if c.id != nil && !c.id.Eq(linkID) {
+			return errors.New("chainlink hash mismatch between server and body hash")
+		}
+		if c.id == nil {
+			c.id = linkID
+		}
+		c.outerLinkV2 = ol2
 	}
 
 	payloadKID = tmp.kid
@@ -580,7 +598,7 @@ func (c *ChainLink) verifyPayloadV2() error {
 	link := OuterLinkV2{
 		version:  version,
 		seqno:    Seqno(seqno),
-		body:     bodyHash[:],
+		curr:     bodyHash[:],
 		prev:     prev,
 		linkType: linkType,
 	}

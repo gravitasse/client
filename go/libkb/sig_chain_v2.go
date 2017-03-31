@@ -30,7 +30,7 @@ type OuterLinkV2 struct {
 	version  int            `codec:"version"`
 	seqno    Seqno          `codec:"seqno"`
 	prev     LinkID         `codec:"prev"`
-	body     []byte         `codec:"body"`
+	curr     LinkID         `codec:"curr"`
 	linkType SigchainV2Type `codec:"type"`
 }
 
