@@ -27,28 +27,41 @@ const (
 // OuterLinkV2 is the second version of Keybase sigchain signatures.
 type OuterLinkV2 struct {
 	_struct  bool           `codec:",toarray"`
-	version  int            `codec:"version"`
-	seqno    Seqno          `codec:"seqno"`
-	prev     LinkID         `codec:"prev"`
-	curr     LinkID         `codec:"curr"`
-	linkType SigchainV2Type `codec:"type"`
+	Version  int            `codec:"version"`
+	Seqno    Seqno          `codec:"seqno"`
+	Prev     LinkID         `codec:"prev"`
+	Curr     LinkID         `codec:"curr"`
+	LinkType SigchainV2Type `codec:"type"`
+}
+
+type OuterLinkV2WithMetadata struct {
+	OuterLinkV2
+	raw   []byte
+	sigID keybase1.SigID
+	kid   keybase1.KID
 }
 
 func (o OuterLinkV2) Encode() ([]byte, error) {
 	return MsgpackEncode(o)
 }
 
-func DecodeOuterLinkV2(armored string) (*OuterLinkV2, keybase1.KID, error) {
-	payload, kid, _, err := SigExtractPayloadAndKID(armored)
+func DecodeOuterLinkV2(armored string) (*OuterLinkV2WithMetadata, error) {
+	payload, kid, sigID, err := SigExtractPayloadAndKID(armored)
 	if err != nil {
-		return nil, kid, err
+		return nil, err
 	}
-	var ret OuterLinkV2
-	err = MsgpackDecode(&ret, payload)
+	var ol OuterLinkV2
+	err = MsgpackDecode(&ol, payload)
 	if err != nil {
-		return nil, kid, err
+		return nil, err
 	}
-	return &ret, kid, nil
+	ret := OuterLinkV2WithMetadata{
+		OuterLinkV2: ol,
+		sigID:       sigID,
+		raw:         payload,
+		kid:         kid,
+	}
+	return &ret, nil
 }
 
 func SigchainV2TypeFromV1TypeAndRevocations(s string, hasRevocations bool) (SigchainV2Type, error) {
@@ -84,4 +97,26 @@ func SigchainV2TypeFromV1TypeAndRevocations(s string, hasRevocations bool) (Sigc
 	default:
 		return SigchainV2TypeNone, ChainLinkError{fmt.Sprintf("Unknow sig v1 type: %s", s)}
 	}
+}
+
+func (o OuterLinkV2) AssertFields(v int, s Seqno, p LinkID, c LinkID, t SigchainV2Type) (err error) {
+	mkErr := func(format string, arg ...interface{}) error {
+		return SigchainV2Error{fmt.Sprintf(format, arg...)}
+	}
+	if o.Version != v {
+		return mkErr("mismatch in version field (%d != %d)", o.Version, v)
+	}
+	if o.Seqno != s {
+		return mkErr("mismatch in seqno field: (%d != %d)", o.Seqno, s)
+	}
+	if !o.Prev.Eq(p) {
+		return mkErr("mismatch in prev pointer: (%s != !%s)", o.Prev, p)
+	}
+	if !o.Curr.Eq(c) {
+		return mkErr("mismatch in curr pointer: (%s != %s)", o.Curr, c)
+	}
+	if o.LinkType != t {
+		return mkErr("mismatch in link type: (%d != %d)", o.LinkType, t)
+	}
+	return nil
 }

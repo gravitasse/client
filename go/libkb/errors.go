@@ -995,6 +995,14 @@ func (c ChainLinkError) Error() string {
 	return fmt.Sprintf("Error in parsing chain Link: %s", c.msg)
 }
 
+type SigchainV2Error struct {
+	msg string
+}
+
+func (s SigchainV2Error) Error() string {
+	return fmt.Sprintf("Error in sigchain v2 link: %s", s.msg)
+}
+
 //=============================================================================
 
 type ReverseSigError struct {

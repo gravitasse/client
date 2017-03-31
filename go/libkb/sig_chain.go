@@ -454,7 +454,7 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links []*C
 		}
 
 		if isModifyingKeys || isFinalLink || isLastLinkInSameKeyRun {
-			_, err = link.VerifySigWithKeyFamily(ckf)
+			err = link.VerifySigWithKeyFamily(ckf)
 			if err != nil {
 				sc.G().Log.CDebugf(ctx, "| Failure in VerifySigWithKeyFamily: %s", err)
 				return
